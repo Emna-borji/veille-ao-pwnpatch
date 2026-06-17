@@ -1,0 +1,12 @@
+# Environnement virtuel (propre à la machine, recréé via requirements.txt)
+.venv/
+
+# Caches Python
+__pycache__/
+*.pyc
+
+# Secrets et variables d'environnement
+.env
+
+# Checkpoints Jupyter
+.ipynb_checkpoints/
