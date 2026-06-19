@@ -121,7 +121,18 @@ def collecter_bceao():
 def construire_prompt(intitule):
     return f"""{CATALOGUE}
 
-Analyse cet appel d'offres et détermine s'il correspond aux services de PWN & PATCH.
+Tu évalues si un appel d'offres correspond aux services de cybersécurité de PWN & PATCH.
+
+RÈGLES IMPORTANTES :
+- Sont PERTINENTS uniquement les marchés portant explicitement sur la SÉCURITÉ informatique :
+  tests d'intrusion, audit de sécurité, conformité (ISO 27001, RGPD, ANCS), gestion des
+  vulnérabilités, réponse à incident, SOC, sensibilisation à la cybersécurité.
+- Ne sont PAS pertinents (score bas) : le développement web ou applicatif, la refonte de
+  site ou d'intranet, la fourniture de matériel informatique, l'infogérance générale,
+  le câblage réseau, et tout ce qui touche au bâtiment, mobilier, véhicules ou travaux.
+- Le simple fait qu'un marché soit "informatique" ne le rend PAS pertinent : il doit
+  concerner la SÉCURITÉ. En cas de doute, considère-le comme NON pertinent.
+
 Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, au format exact :
 {{"relevant": true/false, "score": 0-100, "services": ["..."], "reasoning": "court, en français", "priority": "haute/moyenne/faible"}}
 
