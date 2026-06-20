@@ -37,20 +37,33 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODELE = "llama3.1"
-SEUIL_PERTINENCE = 40
+SEUIL_PERTINENCE = 55   # un achat de produit (20-50) n'est pas pertinent ; un service de sécurité l'est
 
 MOIS = {"janvier":1,"février":2,"fevrier":2,"mars":3,"avril":4,"mai":5,"juin":6,
         "juillet":7,"août":8,"aout":8,"septembre":9,"octobre":10,"novembre":11,
         "décembre":12,"decembre":12}
 
-CATALOGUE = """PWN & PATCH, société de conseil en cybersécurité, propose :
-- Tests d'intrusion (pentest web, mobile, réseau, ingénierie sociale)
-- Audits de sécurité et revues de code
-- Conformité et GRC (ISO 27001, SOC 2, RGPD, directives ANCS)
-- Formation et sensibilisation à la cybersécurité
-- Gestion des vulnérabilités (plateforme Oktoboot)
-- ASM (gestion de la surface d'attaque)
-- Réponse à incident"""
+CATALOGUE = """PWN & PATCH, société de conseil en cybersécurité (prestations de service), propose :
+
+1. Sécurité offensive (Offensive Security) :
+   - Red Team (simulation d'attaques réalistes et avancées)
+   - Tests d'intrusion d'infrastructure (Infrastructure Penetration Testing)
+   - Tests d'intrusion d'applications Web, mobiles et desktop
+   - Évaluation et analyse de vulnérabilités
+
+2. Sécurité du cloud (Cloud Security) sur AWS, Azure et GCP :
+   - Audit / évaluation de sécurité cloud (gap analysis, détection de mauvaises configurations)
+   - Conception et mise en oeuvre d'architectures cloud sécurisées
+   - Stratégie IAM, protection des données, monitoring, DevSecOps, conformité cloud
+
+3. Sécurité de l'information / GRC (gouvernance, risque, conformité) :
+   - Conformité réglementaire (ISO 27001, RGPD, directives ANCS)
+   - Évaluations des risques, cadres sur mesure, support de conformité
+
+4. Threat Intelligence et surveillance via la plateforme Oktoboot :
+   - Renseignement sur les menaces (CTI), surveillance du dark web
+   - Détection de fuites de données et d'identifiants compromis
+   - Cartographie et gestion de la surface d'attaque (ASM)"""
 
 
 # ---------------------------------------------------------------- helpers
@@ -227,9 +240,39 @@ def collecter_bceao():
 def construire_prompt(intitule):
     return f"""{CATALOGUE}
 
-Analyse cet appel d'offres et détermine s'il correspond aux services de PWN & PATCH.
+PWN & PATCH est un cabinet de CONSEIL : il VEND DES PRESTATIONS DE SERVICE intellectuelles
+(audit, test d'intrusion, conseil, formation, réponse à incident). Il NE VEND PAS de produits,
+de licences, de logiciels, ni de matériel.
+
+Analyse l'appel d'offres ci-dessous en suivant ces règles, dans l'ordre :
+
+1) SUJET : l'annonce concerne-t-elle vraiment la SÉCURITÉ informatique ? Si le sujet principal est
+   autre chose (santé, bâtiment, transport, informatique générale sans dimension sécurité...),
+   alors elle n'est PAS pertinente, même si le mot "cyber" ou "sécurité" apparaît au passage.
+
+2) SERVICE ou ACHAT : l'annonce demande-t-elle une PRESTATION DE SERVICE (réaliser un audit, un
+   pentest, du conseil, de la formation) ou l'ACHAT D'UN PRODUIT (acheter/installer des licences,
+   un logiciel, un antivirus, des serveurs, du matériel, des équipements) ?
+   - Prestation de service de sécurité -> PERTINENT.
+   - Simple achat/fourniture de produit ou de licence -> PEU ou PAS pertinent (ce n'est pas le
+     métier de PWN & PATCH), même si le produit est un produit de sécurité.
+
+3) SCORE, gradué selon la correspondance réelle :
+   - 85-100 : prestation directe du cœur de métier (audit de sécurité, test d'intrusion, conseil
+     en cybersécurité, mission de conformité ISO 27001/GRC, réponse à incident).
+   - 55-80  : service lié à la sécurité informatique mais plus indirect (infogérance avec volet
+     sécurité, surveillance, formation cyber).
+   - 20-50  : achat de produit/licence/matériel de sécurité (pas une prestation de conseil).
+   - 0-15   : hors sujet (pas de la sécurité, ou pas de l'informatique).
+   relevant = true uniquement si score >= 55.
+
+Exemples :
+- "Mission d'audit de sécurité du système d'information" -> service, cœur de métier -> score ~90, relevant true.
+- "Acquisition et installation de licences antivirus" -> achat de produit -> score ~30, relevant false.
+- "Services de santé pour le ministère" -> hors sujet -> score ~5, relevant false.
+
 Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, au format exact :
-{{"relevant": true/false, "score": 0-100, "services": ["..."], "reasoning": "court, en français", "priority": "haute/moyenne/faible"}}
+{{"relevant": true/false, "score": 0-100, "services": ["services PWN & PATCH réellement concernés, [] si aucun"], "reasoning": "court, en français, justifie le score", "priority": "haute/moyenne/faible"}}
 
 Appel d'offres : "{intitule}"
 """
@@ -259,14 +302,20 @@ def scorer_ollama(intitule):
     payload = {"model": OLLAMA_MODELE,
                "messages": [{"role": "user", "content": construire_prompt(intitule)}],
                "stream": False, "format": "json", "options": {"temperature": 0}}
-    try:
-        r = requests.post(OLLAMA_URL, json=payload, timeout=120)
-        r.raise_for_status()
-        contenu = r.json().get("message", {}).get("content", "")
-    except Exception as e:
-        print(f"  [erreur Ollama] {e}")
-        return None
-    return parser_reponse(contenu)
+    # 2 tentatives : Ollama local peut être lent selon la charge de la machine
+    for tentative in range(2):
+        try:
+            r = requests.post(OLLAMA_URL, json=payload, timeout=300)
+            r.raise_for_status()
+            contenu = r.json().get("message", {}).get("content", "")
+            return parser_reponse(contenu)
+        except Exception as e:
+            if tentative == 0:
+                print(f"  [Ollama lent, nouvelle tentative] {str(e)[:60]}")
+                time.sleep(3)
+            else:
+                print(f"  [erreur Ollama, annonce ignorée] {str(e)[:60]}")
+                return None
 
 
 # ---------------------------------------------------------------- mongo
@@ -325,6 +374,93 @@ def scorer_les_nouvelles(collection):
         print(f"  [{r['score']:3}] {'PERTINENT' if pertinent else 'non      '} | {doc['intitule'][:55]}")
 
 
+def _description_ted(champ):
+    """Description dans la langue disponible : français d'abord, sinon anglais,
+    sinon n'importe quelle langue (les descriptions TED ne sont pas traduites)."""
+    if isinstance(champ, dict) and champ:
+        for lg in ("fra", "eng"):
+            if champ.get(lg):
+                v = champ[lg]
+                return (v[0] if isinstance(v, list) else v), lg
+        for lg, v in champ.items():       # repli : n'importe quelle langue
+            return (v[0] if isinstance(v, list) else v), lg
+    return None, None
+
+
+def enrichir_pertinentes(collection, max_desc=1500):
+    """Récupère les détails (description, procédure, date limite fiable, prix) pour les
+    annonces TED PERTINENTES pas encore enrichies. Stocke ce qui est présent ; les
+    champs absents restent à None (une autre annonce pourra les avoir)."""
+    a_enrichir = list(collection.find(
+        {"source": "TED", "pertinent": True, "enrichi": {"$ne": True}}))
+    if not a_enrichir:
+        print("Aucune annonce pertinente à enrichir.")
+        return
+    print(f"{len(a_enrichir)} annonce(s) pertinente(s) à enrichir.")
+
+    refs = [d["reference"] for d in a_enrichir if d.get("reference")]
+    champs = ["publication-number", "description-proc", "description-lot",
+              "procedure-type", "deadline-receipt-tender-date-lot",
+              "estimated-value-lot", "estimated-value-cur-lot", "main-activity"]
+
+    # on interroge l'API par lots de 200 (max 250), scope ALL pour enrichir même les clôturées
+    details = {}
+    for i in range(0, len(refs), 200):
+        lot = refs[i:i+200]
+        query = " OR ".join(f'publication-number="{n}"' for n in lot)
+        data = None
+        for _ in range(3):
+            try:
+                r = requests.post(TED_URL, json={"query": query, "fields": champs,
+                                  "limit": 200, "page": 1, "scope": "ALL"}, timeout=60)
+                if r.status_code == 200:
+                    data = r.json(); break
+                time.sleep(2)
+            except Exception:
+                time.sleep(2)
+        if not data:
+            print("  TED injoignable pour ce lot, on réessaiera plus tard.")
+            continue
+        for n in data.get("notices", []):
+            details[n.get("publication-number")] = n
+        time.sleep(1)
+
+    # mettre à jour chaque annonce avec ce qu'on a trouvé
+    enrichies = 0
+    for d in a_enrichir:
+        n = details.get(d.get("reference"))
+        if n is None:
+            continue   # pas reçue cette fois -> on retentera au prochain passage
+        desc, langue = _description_ted(n.get("description-proc") or n.get("description-lot"))
+        if desc:
+            desc = desc[:max_desc]
+        # date limite plus fiable que le champ deadline initial
+        dl = n.get("deadline-receipt-tender-date-lot")
+        if isinstance(dl, list):
+            dl = dl[0] if dl else None
+        dl = str(dl)[:10] if dl else None
+        # prix (souvent absent) + devise
+        prix = n.get("estimated-value-lot")
+        if isinstance(prix, list):
+            prix = prix[0] if prix else None
+        devise = n.get("estimated-value-cur-lot")
+        if isinstance(devise, list):
+            devise = devise[0] if devise else None
+        proc = n.get("procedure-type")
+        if isinstance(proc, list):
+            proc = proc[0] if proc else None
+
+        maj = {"description": desc, "description_langue": langue,
+               "procedure": proc, "prix_estime": prix, "devise": devise,
+               "enrichi": True, "enrichi_le": datetime.now().isoformat(timespec="seconds")}
+        if dl:   # si une date limite plus fiable existe, on l'utilise
+            maj["delai_soumission"] = dl
+        collection.update_one({"cle_unique": d["cle_unique"]}, {"$set": maj})
+        enrichies += 1
+        print(f"  enrichie [{langue or '--'}] {d['intitule'][:50]}")
+    print(f"{enrichies} annonce(s) enrichie(s).")
+
+
 def changer_statut(collection, cle_unique, nouveau_statut, par="utilisateur"):
     maintenant = datetime.now().isoformat(timespec="seconds")
     collection.update_one(
@@ -352,6 +488,7 @@ def main():
 
     marquer_cloturees(collection)
     scorer_les_nouvelles(collection)
+    enrichir_pertinentes(collection)
 
     total = collection.count_documents({})
     pertinentes = collection.count_documents({"pertinent": True})
